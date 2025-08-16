@@ -74,9 +74,16 @@ http://localhost:35000
 Archivos estáticos disponibles:
 ```
 http://localhost:35000/static/index.html
-http://localhost:35000/static/styles.css
-http://localhost:35000/static/app.js
+<img width="925" height="940" alt="imagen" src="https://github.com/user-attachments/assets/464b8523-d508-4e32-a961-5b302b8766cb" />
+
+http://localhost:35000/static/css/styles.css
+<img width="934" height="1018" alt="imagen" src="https://github.com/user-attachments/assets/9429a654-b0f9-4447-9b04-57cbcc7fa2dd" />
+
+http://localhost:35000/static/js/app.js
+<img width="938" height="567" alt="imagen" src="https://github.com/user-attachments/assets/8a71f398-2457-4475-b2cf-28c4323e160b" />
+
 http://localhost:35000/static/images/logo.png
+
 ```
 
 ---
