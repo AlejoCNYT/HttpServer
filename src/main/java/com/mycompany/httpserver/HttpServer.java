@@ -198,27 +198,33 @@ public class HttpServer {
         }
     }
 
-    private static Path tryResolveFile(String path) {
-        // Try in development location (src/main/resources/static)
-        Path devPath = Paths.get("src/main/resources/static" + path);
-        if (Files.exists(devPath)) {
-            return devPath;
-        }
-        
-        // Try in production location (target/classes/static)
-        Path prodPath = Paths.get("target/classes/static" + path);
-        if (Files.exists(prodPath)) {
-            return prodPath;
-        }
-        
-        // Try in current directory (for standalone execution)
-        Path currentPath = Paths.get("static" + path);
-        if (Files.exists(currentPath)) {
-            return currentPath;
-        }
-        
-        return null;
+private static Path tryResolveFile(String path) {
+    // 1. Primero busca en la ruta de desarrollo tradicional
+    Path devPath = Paths.get("src/main/resources/static" + path);
+    if (Files.exists(devPath)) {
+        return devPath;
     }
+    
+    // 2. Busca en la ruta alternativa donde está tu logo
+    Path altPath = Paths.get("src/main/java/com/mycompany/httpserver/resources/static" + path);
+    if (Files.exists(altPath)) {
+        return altPath;
+    }
+    
+    // 3. Busca en el directorio de compilación
+    Path prodPath = Paths.get("target/classes/static" + path);
+    if (Files.exists(prodPath)) {
+        return prodPath;
+    }
+    
+    // 4. Último recurso: busca en directorio actual
+    Path currentPath = Paths.get("static" + path);
+    if (Files.exists(currentPath)) {
+        return currentPath;
+    }
+    
+    return null;
+}
 
     private static String getFileExtension(String path) {
         int lastDot = path.lastIndexOf('.');
