@@ -31,8 +31,10 @@ src/
     └── resources/
         └── static/
             ├── index.html
-            ├── styles.css
-            ├── app.js
+            ├── css/
+                ├── styles.css            
+            ├── js/
+                ├── app.js
             └── images/
                 └── logo.png
 ```
