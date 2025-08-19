@@ -33,6 +33,7 @@ public class HttpServer {
         MIME_TYPES.put("gif", "image/gif");
         MIME_TYPES.put("ico", "image/x-icon");
         MIME_TYPES.put("json", "application/json");
+        MIME_TYPES.put("ong", "image/png"); // por si la imagen quedó con extensión .ong (typo)
     }
 
     public static void main(String[] args) throws IOException, URISyntaxException {
@@ -62,9 +63,8 @@ public class HttpServer {
                 continue;
             }
 
-            try (PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
-                 BufferedReader in = new BufferedReader(
-                     new InputStreamReader(clientSocket.getInputStream()))) {
+            try (BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                 BufferedOutputStream dataOut = new BufferedOutputStream(clientSocket.getOutputStream())) {
                 
                 String inputLine;
                 URI requesturi = null;
@@ -86,26 +86,28 @@ public class HttpServer {
                     }
                 }
 
-                String outputLine;
+                byte[] responseBytes;
                 if (requesturi == null) {
-                    outputLine = buildResponse(400, "text/plain", "Bad Request");
+                    responseBytes = buildResponse(400, "text/plain", "Bad Request").getBytes(StandardCharsets.UTF_8);
                 } else if (requesturi.getPath().startsWith("/app/hello")) {
-                    outputLine = handleHelloRequest(requesturi);
+                    responseBytes = handleHelloRequest(requesturi).getBytes(StandardCharsets.UTF_8);
                 } else if (requesturi.getPath().startsWith("/stocks")) {
-                    outputLine = handleStockRequest(requesturi);
+                    responseBytes = handleStockRequest(requesturi).getBytes(StandardCharsets.UTF_8);
                 } else if (requesturi.getPath().startsWith("/static/")) {
-                    outputLine = handleFileRequest(requesturi);
+                    responseBytes = handleFileResponseBytes(requesturi);
                 } else if (requesturi.getPath().equals("/")) {
-                    outputLine = handleFileRequest(new URI("/static/index.html"));
+                    responseBytes = handleFileResponseBytes(new URI("/static/index.html"));
                 } else {
-                    outputLine = handleFileRequest(new URI("/static" + requesturi.getPath()));
+                    responseBytes = handleFileResponseBytes(new URI("/static" + requesturi.getPath()));
                 }
-
-                out.println(outputLine);
+                dataOut.write(responseBytes);
+                dataOut.flush();
             } catch (Exception e) {
                 System.err.println("Error handling client: " + e.getMessage());
                 try {
-                    clientSocket.getOutputStream().write(buildResponse(500, "text/plain", "Internal Server Error").getBytes());
+                    clientSocket.getOutputStream().write(
+                        buildResponse(500, "text/plain", "Internal Server Error").getBytes(StandardCharsets.UTF_8)
+                    );
                 } catch (IOException ex) {
                     System.err.println("Could not send error response: " + ex.getMessage());
                 }
@@ -142,16 +144,17 @@ public class HttpServer {
         try {
             String symbol = "fb";
             if (requesturi.getQuery() != null && requesturi.getQuery().contains("symbol=")) {
-                symbol = requesturi.getQuery().split("symbol=")[1].split("&")[0];
+                symbol = requesturi.getQuery().split("=")[1];
             }
 
-            String apiUrl = "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=" + 
-                          symbol + "&apikey=" + API_KEY;
+            String url = String.format(
+                "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=%s&apikey=%s",
+                symbol, API_KEY
+            );
 
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(apiUrl))
+                    .uri(URI.create(url))
                     .timeout(Duration.ofSeconds(10))
-                    .header("User-Agent", "Mozilla/5.0")
                     .GET()
                     .build();
 
@@ -167,17 +170,19 @@ public class HttpServer {
         }
     }
 
-    private static String handleFileRequest(URI requesturi) throws IOException {
+    // === Nuevo: respuesta de archivos binaria/segura ===
+    private static byte[] handleFileResponseBytes(URI requesturi) throws IOException {
         String path = requesturi.getPath().replaceFirst("^/static", "");
         if (path.isEmpty() || path.equals("/")) path = "/index.html";
 
         path = path.replaceAll("\\.\\.", "").replaceAll("//", "/");
 
-        System.out.println("Buscando archivo en: " + path);
-        Path filePath = tryResolveFile(path);
+        System.out.println("Buscando archivo en (bytes): " + path);
 
+        Path filePath = tryResolveFile(path);
         if (filePath == null || !Files.exists(filePath)) {
-            return buildResponse(404, "text/plain", "File not found: " + path);
+            return buildResponse(404, "text/plain", "File not found: " + path)
+                   .getBytes(StandardCharsets.UTF_8);
         }
 
         String contentType = Files.probeContentType(filePath);
@@ -186,75 +191,67 @@ public class HttpServer {
             contentType = MIME_TYPES.getOrDefault(extension, "application/octet-stream");
         }
 
-        System.out.println("Sirviendo archivo: " + filePath + " como " + contentType);
+        System.out.println("Sirviendo archivo (bytes): " + filePath + " como " + contentType);
         byte[] fileContent = Files.readAllBytes(filePath);
 
-        return buildBinaryResponse(200, contentType, fileContent);
+        return buildBinaryResponseBytes(200, contentType, fileContent);
     }
 
     private static Path tryResolveFile(String path) {
-    // Normaliza la ruta para seguridad
-    path = path.replaceAll("\\.\\.", "").replaceAll("//", "/");
-    
-    // Lista de posibles ubicaciones a verificar
-    String[] possibleLocations = {
-        "src/main/resources/static",  // Desarrollo
-        "target/classes/static",      // Producción después de compilar
-        "static",                     // Directorio raíz
-        "resources/static"            // Para algunos IDEs
-    };
-    
-    for (String location : possibleLocations) {
-        Path filePath = Paths.get(location + path);
-        if (Files.exists(filePath) && !Files.isDirectory(filePath)) {
-            System.out.println("Found file at: " + filePath.toAbsolutePath());
-            return filePath;
+        // Normaliza la ruta para seguridad
+        path = path.replaceAll("\\.\\.", "").replaceAll("//", "/");
+        
+        // Lista de posibles ubicaciones a verificar
+        String[] possibleLocations = {
+            "src/main/resources/static",  // Desarrollo
+            "target/classes/static",      // Producción después de compilar (mvn package)
+            "static",                     // Directorio raíz
+            "resources/static"            // Algunos IDEs
+        };
+        
+        for (String location : possibleLocations) {
+            Path filePath = Paths.get(location + path);
+            if (Files.exists(filePath) && !Files.isDirectory(filePath)) {
+                System.out.println("Found file at: " + filePath.toAbsolutePath());
+                return filePath;
+            }
         }
-    }
-    
-    System.out.println("File not found in any standard location: " + path);
-    return null;
+        
+        System.out.println("File not found in any standard location: " + path);
+        return null;
     }
 
     private static String getFileExtension(String path) {
-        int lastDot = path.lastIndexOf('.');
-        if (lastDot > 0) {
-            return path.substring(lastDot + 1).toLowerCase();
-        }
-        return "";
+        int dotIndex = path.lastIndexOf('.');
+        return (dotIndex == -1) ? "" : path.substring(dotIndex + 1).toLowerCase();
     }
 
-    private static String buildBinaryResponse(int statusCode, String contentType, byte[] content) {
+    // --- RESPUESTAS HTTP ---
+    private static byte[] buildBinaryResponseBytes(int statusCode, String contentType, byte[] content) {
         String statusText = getStatusText(statusCode);
-
-        StringBuilder response = new StringBuilder();
-        response.append("HTTP/1.1 ").append(statusCode).append(" ").append(statusText).append("\r\n");
-        response.append("Content-Type: ").append(contentType).append("\r\n");
-        response.append("Content-Length: ").append(content.length).append("\r\n");
-        response.append("Connection: close\r\n");
-        response.append("\r\n"); // Línea vacía que separa headers del cuerpo
-
-        // Convertir a bytes usando ISO-8859-1 para los headers
         try {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-            outputStream.write(response.toString().getBytes(StandardCharsets.ISO_8859_1));
-            outputStream.write(content); // Escribe los bytes de la imagen directamente
-            return new String(outputStream.toByteArray(), StandardCharsets.ISO_8859_1);
+            outputStream.write(("HTTP/1.1 " + statusCode + " " + statusText + "\r\n").getBytes(StandardCharsets.ISO_8859_1));
+            outputStream.write(("Content-Type: " + contentType + "\r\n").getBytes(StandardCharsets.ISO_8859_1));
+            outputStream.write(("Content-Length: " + content.length + "\r\n").getBytes(StandardCharsets.ISO_8859_1));
+            outputStream.write("Connection: close\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
+            outputStream.write(content);
+            return outputStream.toByteArray();
         } catch (IOException e) {
-            System.err.println("Error building binary response: " + e.getMessage());
-            return buildResponse(500, "text/plain", "Error building binary response");
+            return buildResponse(500, "text/plain", "Error building binary response: " + e.getMessage())
+                   .getBytes(StandardCharsets.UTF_8);
         }
     }
 
     private static String buildResponse(int statusCode, String contentType, String content) {
         String statusText = getStatusText(statusCode);
         
-        return "HTTP/1.1 " + statusCode + " " + statusText + "\r\n" +
-               "Content-Type: " + contentType + "\r\n" +
-               "Content-Length: " + content.length() + "\r\n" +
-               "Connection: close\r\n" +
-               "\r\n" +
-               content;
+        return "HTTP/1.1 " + statusCode + " " + statusText + "\r\n"
+               + "Content-Type: " + contentType + "\r\n"
+               + "Content-Length: " + content.getBytes(StandardCharsets.UTF_8).length + "\r\n"
+               + "Connection: close\r\n"
+               + "\r\n"
+               + content;
     }
 
     private static String getStatusText(int statusCode) {
