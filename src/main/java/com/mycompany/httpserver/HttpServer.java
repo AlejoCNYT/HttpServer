@@ -170,61 +170,51 @@ public class HttpServer {
     private static String handleFileRequest(URI requesturi) throws IOException {
         String path = requesturi.getPath().replaceFirst("^/static", "");
         if (path.isEmpty() || path.equals("/")) path = "/index.html";
-        
-        // Security: prevent directory traversal
+
         path = path.replaceAll("\\.\\.", "").replaceAll("//", "/");
-        
-        // Try multiple locations for the file
+
+        System.out.println("Buscando archivo en: " + path);
         Path filePath = tryResolveFile(path);
-        
-        if (filePath == null || !Files.exists(filePath) || Files.isDirectory(filePath)) {
+
+        if (filePath == null || !Files.exists(filePath)) {
             return buildResponse(404, "text/plain", "File not found: " + path);
         }
 
-        // Determine content type
         String contentType = Files.probeContentType(filePath);
         if (contentType == null) {
             String extension = getFileExtension(path);
-            contentType = MIME_TYPES.getOrDefault(extension, "text/plain");
+            contentType = MIME_TYPES.getOrDefault(extension, "application/octet-stream");
         }
 
+        System.out.println("Sirviendo archivo: " + filePath + " como " + contentType);
         byte[] fileContent = Files.readAllBytes(filePath);
-        
-        if (contentType.startsWith("text/") || contentType.equals("application/javascript") || contentType.equals("application/json")) {
-            return buildBinaryResponse(200, contentType, fileContent);
-        } else {
-            // For binary files (images)
-            return buildBinaryResponse(200, contentType, fileContent);
-        }
+
+        return buildBinaryResponse(200, contentType, fileContent);
     }
 
-private static Path tryResolveFile(String path) {
-    // 1. Primero busca en la ruta de desarrollo tradicional
-    Path devPath = Paths.get("src/main/resources/static" + path);
-    if (Files.exists(devPath)) {
-        return devPath;
+    private static Path tryResolveFile(String path) {
+    // Normaliza la ruta para seguridad
+    path = path.replaceAll("\\.\\.", "").replaceAll("//", "/");
+    
+    // Lista de posibles ubicaciones a verificar
+    String[] possibleLocations = {
+        "src/main/resources/static",  // Desarrollo
+        "target/classes/static",      // Producción después de compilar
+        "static",                     // Directorio raíz
+        "resources/static"            // Para algunos IDEs
+    };
+    
+    for (String location : possibleLocations) {
+        Path filePath = Paths.get(location + path);
+        if (Files.exists(filePath) && !Files.isDirectory(filePath)) {
+            System.out.println("Found file at: " + filePath.toAbsolutePath());
+            return filePath;
+        }
     }
     
-    // 2. Busca en la ruta alternativa donde está tu logo
-    Path altPath = Paths.get("src/main/java/com/mycompany/httpserver/resources/static" + path);
-    if (Files.exists(altPath)) {
-        return altPath;
-    }
-    
-    // 3. Busca en el directorio de compilación
-    Path prodPath = Paths.get("target/classes/static" + path);
-    if (Files.exists(prodPath)) {
-        return prodPath;
-    }
-    
-    // 4. Último recurso: busca en directorio actual
-    Path currentPath = Paths.get("static" + path);
-    if (Files.exists(currentPath)) {
-        return currentPath;
-    }
-    
+    System.out.println("File not found in any standard location: " + path);
     return null;
-}
+    }
 
     private static String getFileExtension(String path) {
         int lastDot = path.lastIndexOf('.');
@@ -236,20 +226,22 @@ private static Path tryResolveFile(String path) {
 
     private static String buildBinaryResponse(int statusCode, String contentType, byte[] content) {
         String statusText = getStatusText(statusCode);
-        
+
         StringBuilder response = new StringBuilder();
         response.append("HTTP/1.1 ").append(statusCode).append(" ").append(statusText).append("\r\n");
         response.append("Content-Type: ").append(contentType).append("\r\n");
         response.append("Content-Length: ").append(content.length).append("\r\n");
         response.append("Connection: close\r\n");
-        response.append("\r\n");
-        
+        response.append("\r\n"); // Línea vacía que separa headers del cuerpo
+
+        // Convertir a bytes usando ISO-8859-1 para los headers
         try {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-            outputStream.write(response.toString().getBytes(StandardCharsets.UTF_8));
-            outputStream.write(content);
-            return outputStream.toString(StandardCharsets.UTF_8.name());
+            outputStream.write(response.toString().getBytes(StandardCharsets.ISO_8859_1));
+            outputStream.write(content); // Escribe los bytes de la imagen directamente
+            return new String(outputStream.toByteArray(), StandardCharsets.ISO_8859_1);
         } catch (IOException e) {
+            System.err.println("Error building binary response: " + e.getMessage());
             return buildResponse(500, "text/plain", "Error building binary response");
         }
     }
